@@ -19,9 +19,36 @@ import Source
 import PRNG
 import Sigma_HBFC
 import System.FilePath.Posix (isValid)
+import Control.Parallel.MPI.Simple
+import Data.Serialize (encode, decode, get, put, Serialize)
+import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector.V3 as V3
+import Control.Applicative
 
+instance Serialize V3.Vector3 where
+  put (V3.Vector3 a b c) = put [a,b,c]
+  get = (\[a,b,c] -> V3.Vector3 a b c) <$> get
+instance Serialize EventCount where
+  put (EventCount a b c d e f g h) = put [a,b,c,d,e,f,g,h]
+  get = (\[a,b,c,d,e,f,g,h] -> EventCount a b c d e f g h) <$> get
+instance Serialize CellTally where
+  put (CellTally m e) = put m >> put e
+  get = CellTally <$> get <*> get
+instance Serialize Momentum where
+  put (Momentum v) = put v
+  get = Momentum <$> get
+instance Serialize Energy where
+  put (Energy e) = put e
+  get = Energy <$> get
+instance Serialize EnergyWeight where
+  put (EnergyWeight e) = put e
+  get = EnergyWeight <$> get
 
-runSim :: CLOpts -> IO ()
+instance Serialize Tally where
+  put (Tally ge dep es) = put (ge, (V.toList dep), es)
+  get = (\(ge, dep, es) -> Tally ge (V.fromList dep) es) <$> get
+
+runSim :: CLOpts -> IO Tally
 runSim (CLOpts { nps = n
                , inputF = infile
                , outputF = outfile
@@ -38,8 +65,7 @@ runSim (CLOpts { nps = n
       lnue  = trim ndropped mshsz lnuer
       statsNuE  = calcSrcStats lnue dt n
       tllyNuE   = runManyParticles statsNuE chunkSize msh a 
-  writeTally (outfile ++ "_nuE") tllyNuE
-  return ()
+  return tllyNuE
 
 trim :: Int -> Int -> [a] -> [a]
 trim d t l = take t $ drop d l
@@ -73,15 +99,26 @@ chunk n = L.unfoldr go
               r        -> Just r
 
 main :: IO ()
-main = do
-  argv <- getArgs
-  (inopts,nonOpts) <- getOpts argv
-  putStrLn $  "opts = " ++ show inopts
-  putStrLn $  "ns = " ++ show nonOpts
-  opts <- checkOpts inopts
-  putStrLn $ "opts checked ok: " ++ show opts
-  runSim opts
-
+main = mpi $ do
+  size <- commSize commWorld
+  rank <- commRank commWorld
+  if size < 2 then do
+      putStrLn "Need at least two processes to run this code"
+  else do
+      argv <- getArgs
+      (inopts,nonOpts) <- getOpts argv
+      putStrLn $  "opts = " ++ show inopts
+      putStrLn $  "ns = " ++ show nonOpts
+      opts <- checkOpts inopts
+      putStrLn $ "opts checked ok: " ++ show opts
+      tally <- runSim opts
+      let root = 0 :: Rank
+      if rank == root then do
+        results <- gatherRecv commWorld root tally
+        let total = L.foldl1' merge results
+        writeTally ((outputF opts) ++ "_nuE") total
+      else do
+        gatherSend commWorld root tally
 
 -- Command line processing 
 
