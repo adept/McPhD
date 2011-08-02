@@ -45,7 +45,7 @@ runManyParticles !n msh =
 chunk :: Int -> [a] -> [[a]]
 chunk n = L.unfoldr go
   where
-    go xs = case splitAt n xs of
+    go xs = case L.splitAt n xs of
               ([], []) -> Nothing
               r        -> Just r
 

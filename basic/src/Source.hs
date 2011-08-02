@@ -1,3 +1,4 @@
+{-# LANGUAGE DoAndIfThenElse #-}
 module Source where
 
 import Control.Monad.State
